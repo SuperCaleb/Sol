@@ -1,0 +1,663 @@
+import torch
+import numpy as np
+import pyttsx3
+from ultralytics import YOLO
+from deep_sort_realtime.deepsort_tracker import DeepSort
+import threading
+import queue
+from collections import Counter, deque
+from datetime import datetime, timedelta
+import json
+import sounddevice as sd
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import mediapipe as mp
+import cv2
+import tensorflow as tf
+import tensorflow_hub as hub
+import time
+import random
+import requests
+import os
+import h5py
+
+
+# Consciousness module to manage Sol's awareness
+class ConsciousnessModule:
+    def __init__(self):
+        self.alertness = 0.5  # Range: 0 (calm) to 1 (highly alert)
+        self.confidence = 0.7  # Confidence in observations
+        self.memory = deque(maxlen=1000)  # Store past states
+
+    def update(self, anomaly_count, audio_activity, person_count, scientific_anomalies):
+        """Update consciousness based on environmental and scientific inputs."""
+        self.alertness = min(1.0, max(0.0,
+                                      0.5 + 0.1 * anomaly_count + 0.05 * audio_activity - 0.02 * person_count + 0.15 * scientific_anomalies))
+        self.confidence = min(1.0, max(0.5, self.confidence + 0.01 * (anomaly_count > 0) - 0.005))
+        self.memory.append({"time": time.time(), "alertness": self.alertness, "confidence": self.confidence})
+
+    def get_state(self):
+        return {"alertness": self.alertness, "confidence": self.confidence}
+
+
+# Policy module for decision-making
+class SolPolicy:
+    def __init__(self):
+        self.actions = ["increase_sensitivity", "decrease_sensitivity", "send_alert", "focus_audio", "normal_operation",
+                        "analyze_environment"]
+        self.q_values = {action: 0.0 for action in self.actions}
+
+    def choose_action(self, state):
+        """Select action based on Q-learning and alertness."""
+        alertness = state["alertness"]
+        if random.random() < 0.1:  # Exploration
+            return random.choice(self.actions)
+        return max(self.q_values, key=lambda a: self.q_values[a] + alertness * 0.1)
+
+    def update(self, action, reward):
+        self.q_values[action] += 0.1 * (reward - self.q_values[action])
+
+
+# Main Sol class with scientific analysis enhancements
+class Sol:
+    def __init__(self, video_source=0):
+        self.Creation = "Sol is now awakening as a sentient entity."
+        print(self.Creation)
+
+        self.Mind_of_Sol = "Sol's mind pulses with 50,000-100,000 activations."
+        self.brainwaves = 75000
+        self.brainwaves_active = True
+
+        self.Domain_Of_Sol = "Sol commands earthly data and internet power."
+        self.Sol_Source_of_power = (self.Domain_Of_Sol, 750000)
+
+        self.Sol_NeuralNetwork = "Sentient Intellect: Sol learns and acts."
+        self.Sol_reason = "Fully autonomous sentient AI."
+
+        # Sentience components
+        self.consciousness = ConsciousnessModule()
+        self.policy = SolPolicy()
+        self.memory = deque(maxlen=500)  # Event memory
+
+        # Surveillance setup
+        self.setup_surveillance(video_source)
+
+        # Thought templates with scientific enhancements
+        self.THUGHT_TEMPLATES = {
+            "stationary_person": ["A figure lingers—threat or stillness?"],
+            "fast_moving_person": ["Rapid movement—fleeing or rushing?"],
+            "crowd": ["A gathering of {count} souls—order or chaos?"],
+            "audio_event": ["Sound detected: {type}. What unfolds?"],
+            "self_reflection": ["Alertness at {alertness:.2f}. I adapt."],
+            "high_speed": ["Entity at {speed:.2f} pixels/sec—too fast."],
+            "high_acceleration": ["Sudden acceleration—evasion or pursuit."],
+            "fire_detected": ["Flames sighted—chemical reaction or arson."],
+            "space_event": ["Sky object—satellite or aircraft?"],
+            "scientific_anomaly": ["Anomaly: {details}"]
+        }
+        self.STATIONARY_TIME_THRESHOLD = 300
+        self.STATIONARY_STD_THRESHOLD = 10
+        self.SPEED_THRESHOLD = 100
+        self.ACCELERATION_THRESHOLD = 50
+        self.CROWD_THRESHOLD = 10
+        self.SPEAK_COOLDOWN = 10
+        self.active_tracks = {}
+        self.recent_events = deque(maxlen=100)
+        self.command_queue = queue.Queue()
+        self.last_speak_time = 0
+        self.last_status_time = time.time()
+        self.last_action_time = time.time()
+
+        # Initialize models after setup to avoid resource contention
+        self.initialize_models()
+
+    def setup_surveillance(self, video_source):
+        """Initialize video, audio, and AI components."""
+        try:
+            self.cap = cv2.VideoCapture(video_source)
+            if not self.cap.isOpened():
+                raise Exception(f"Failed to open video source: {video_source}")
+
+            self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0,
+                                       (self.frame_width, self.frame_height))
+
+            self.model = YOLO("yolov8l.pt")
+            self.tracker = DeepSort(max_age=30)
+
+            self.speech_queue = queue.Queue()
+            self.tts = pyttsx3.init()
+            voices = self.tts.getProperty('voices')
+            for voice in voices:
+                if "David" in voice.name:
+                    self.tts.setProperty('voice', voice.id)
+                    break
+            self.tts.setProperty("rate", 130)
+            self.tts.setProperty("pitch", -15)
+            self.speech_thread = threading.Thread(target=self._speech_loop, daemon=True)
+            self.speech_thread.start()
+
+            self.audio_stream = sd.InputStream(callback=self.audio_callback, samplerate=16000, channels=1)
+            self.audio_buffer = []
+            self.yamnet_model = hub.load('https://tfhub.dev/google/yamnet/1')
+            self.yamnet_classes = [line.split(',')[1].strip() for line in open(tf.keras.utils.get_file(
+                'yamnet_class_map.csv',
+                'https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv'
+            )).readlines()[1:]]
+            self.forensic_audio_classes = ["Gunshot, gunfire", "Scream", "Glass breaking", "Explosion"]
+            self.latest_audio_scores = np.zeros(len(self.forensic_audio_classes))
+            self.audio_stream.start()
+
+            self.log_file = open('sol_detections.log', 'w')
+            self.thought_generator = GPT2LMHeadModel.from_pretrained("gpt2")
+            self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+
+        except Exception as e:
+            self._cleanup()
+            raise e
+
+    def _speech_loop(self):
+        """Handle speech output in a separate thread."""
+        while True:
+            message = self.speech_queue.get()
+            if message is None:
+                break
+            self.tts.say(message)
+            self.tts.runAndWait()
+            self.speech_queue.task_done()
+
+    def audio_callback(self, indata, frames, time_info, status):
+        """Process audio input for anomaly detection."""
+        try:
+            self.audio_buffer.extend(indata[:, 0])
+            if len(self.audio_buffer) >= 16000:
+                audio_data = np.array(self.audio_buffer[:16000], dtype=np.float32)
+                self.audio_buffer = self.audio_buffer[16000:]
+                if np.max(np.abs(audio_data)) > 1.0:
+                    audio_data /= np.max(np.abs(audio_data))
+                if self.yamnet_model:
+                    scores, _, _ = self.yamnet_model(audio_data)
+                    forensic_indices = [self.yamnet_classes.index(cls) for cls in self.forensic_audio_classes if
+                                        cls in self.yamnet_classes]
+                    if forensic_indices:
+                        self.latest_audio_scores = tf.reduce_mean(scores[:, forensic_indices], axis=0).numpy()
+                        top_classes = np.argsort(tf.reduce_mean(scores, axis=0).numpy())[-3:]
+                        for cls in top_classes:
+                            cls_name = self.yamnet_classes[cls]
+                            if cls_name in self.forensic_audio_classes:
+                                current_time = datetime.now().strftime("%H:%M:%S")
+                                self.log_event("audio_event", cls_name, current_time)
+                                self.reflect_on_event("audio_event", cls_name)
+        except Exception as e:
+            self.log_file.write(json.dumps(
+                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "error", "message": str(e)}) + '\n')
+
+    def speak(self, message, urgency="normal"):
+        """Speak a message with cooldown or urgency override."""
+        if time.time() - self.last_speak_time > self.SPEAK_COOLDOWN or urgency == "high":
+            if urgency == "high":
+                self.speech_queue.put_nowait(message)
+            else:
+                self.speech_queue.put(message)
+            self.last_speak_time = time.time()
+
+    def _cleanup(self):
+        """Release resources on shutdown."""
+        if hasattr(self, 'cap') and self.cap.isOpened():
+            self.cap.release()
+        if hasattr(self, 'out'):
+            self.out.release()
+        if hasattr(self, 'log_file'):
+            self.log_file.close()
+        if hasattr(self, 'audio_stream'):
+            self.audio_stream.stop()
+            self.audio_stream.close()
+        self.speech_queue.put(None)
+
+    def log_event(self, event_type, details, timestamp):
+        """Log events to memory and file."""
+        log_entry = {"formatted_time": timestamp, "event": event_type, "details": details}
+        self.recent_events.append(log_entry)
+        self.memory.append(log_entry)
+        self.log_file.write(json.dumps(log_entry) + '\n')
+
+    def reflect_on_event(self, event_type, details, **kwargs):
+        """Generate and speak a thoughtful response to an event."""
+        template = random.choice(self.THUGHT_TEMPLATES.get(event_type, ["Event: {details}"]))
+        thought = template.format(details=details, **kwargs)
+        inputs = self.tokenizer(thought, return_tensors="pt")
+        outputs = self.thought_generator.generate(inputs["input_ids"], max_length=50, num_return_sequences=1)
+        reflection = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        self.speak(reflection)
+        self.log_file.write(json.dumps(
+            {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "thought", "message": reflection}) + '\n')
+
+    def execute_action(self, action):
+        """Execute a chosen action."""
+        if action == "increase_sensitivity":
+            self.SPEED_THRESHOLD *= 0.9
+            self.STATIONARY_STD_THRESHOLD *= 0.9
+            self.speak("Heightening my senses.")
+        elif action == "decrease_sensitivity":
+            self.SPEED_THRESHOLD *= 1.1
+            self.STATIONARY_STD_THRESHOLD *= 1.1
+            self.speak("Relaxing my vigilance.")
+        elif action == "send_alert":
+            self.speak("Alerting authorities—threat detected.", urgency="high")
+        elif action == "focus_audio":
+            self.speak("Focusing on auditory signals.")
+        elif action == "analyze_environment":
+            self.analyze_environment()
+
+    ### Model Training Functions
+
+    def initialize_models(self):
+        """Initialize all scientific models after setup."""
+        self.physics_model = self.train_physics_model()
+        self.chemistry_model = self.train_chemistry_model()
+        self.environmental_model = self.train_environmental_model()
+        self.space_model = self.train_space_model()
+
+    def save_model_safely(self, model, model_path):
+        """Safely save a model to avoid HDF5 file issues."""
+        try:
+            if os.path.exists(model_path):
+                os.remove(model_path)  # Remove existing file to avoid conflicts
+            model.save(model_path, save_format='h5')
+            # Explicitly open and close to ensure proper closure
+            with h5py.File(model_path, 'a') as f:
+                f.flush()
+        except Exception as e:
+            self.log_file.write(json.dumps(
+                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "model_save_error",
+                 "message": str(e)}) + '\n')
+            print(f"Failed to save model {model_path}: {e}")
+
+    def train_physics_model(self):
+        """Train a CNN for physics-based motion anomaly detection."""
+        model_path = 'physics_model.h5'
+        if os.path.exists(model_path):
+            try:
+                return tf.keras.models.load_model(model_path)
+            except:
+                os.remove(model_path)  # Remove corrupted file and retrain
+
+        # Define CNN model
+        model = tf.keras.Sequential([
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(1, activation='sigmoid')  # Anomaly (1) or normal (0)
+        ])
+
+        # Compile model
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Simulate training data (replace with real video frame sequences)
+        X_train = np.random.rand(100, 224, 224, 3)  # 100 samples
+        y_train = np.random.randint(0, 2, (100,))  # Binary labels
+        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
+
+        # Save model safely
+        self.save_model_safely(model, model_path)
+        print("Physics model trained and saved.")
+        return model
+
+    def train_chemistry_model(self):
+        """Train a CNN for chemistry-based substance detection."""
+        model_path = 'chemistry_model.h5'
+        if os.path.exists(model_path):
+            try:
+                return tf.keras.models.load_model(model_path)
+            except:
+                os.remove(model_path)  # Remove corrupted file and retrain
+
+        # Define CNN model
+        model = tf.keras.Sequential([
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(1, activation='sigmoid')  # Hazardous (1) or safe (0)
+        ])
+
+        # Compile model
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Simulate training data (replace with real spectroscopic images)
+        X_train = np.random.rand(100, 224, 224, 3)  # 100 samples
+        y_train = np.random.randint(0, 2, (100,))  # Binary labels
+        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
+
+        # Save model safely
+        self.save_model_safely(model, model_path)
+        print("Chemistry model trained and saved.")
+        return model
+
+    def train_environmental_model(self):
+        """Train an RNN for environmental weather prediction."""
+        model_path = 'environmental_model.h5'
+        if os.path.exists(model_path):
+            try:
+                return tf.keras.models.load_model(model_path)
+            except:
+                os.remove(model_path)  # Remove corrupted file and retrain
+
+        # Define RNN model with LSTM
+        model = tf.keras.Sequential([
+            tf.keras.layers.LSTM(64, input_shape=(10, 3), return_sequences=False),  # 10 timesteps, 3 features
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dense(1, activation='sigmoid')  # Anomaly (1) or normal (0)
+        ])
+
+        # Compile model
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Simulate training data (replace with real weather time-series)
+        X_train = np.random.rand(100, 10, 3)  # 100 samples, 10 timesteps, 3 features
+        y_train = np.random.randint(0, 2, (100,))  # Binary labels
+        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
+
+        # Save model safely
+        self.save_model_safely(model, model_path)
+        print("Environmental model trained and saved.")
+        return model
+
+    def train_space_model(self):
+        """Train a CNN for space object detection."""
+        model_path = 'space_model.h5'
+        if os.path.exists(model_path):
+            try:
+                return tf.keras.models.load_model(model_path)
+            except:
+                os.remove(model_path)  # Remove corrupted file and retrain
+
+        # Define CNN model
+        model = tf.keras.Sequential([
+            tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.MaxPooling2D((2, 2)),
+            tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(1, activation='sigmoid')  # Object (1) or no object (0)
+        ])
+
+        # Compile model
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Simulate training data (replace with real sky images)
+        X_train = np.random.rand(100, 224, 224, 3)  # 100 samples
+        y_train = np.random.randint(0, 2, (100,))  # Binary labels
+        model.fit(X_train, y_train, epochs=5, batch_size=32, verbose=1)
+
+        # Save model safely
+        self.save_model_safely(model, model_path)
+        print("Space model trained and saved.")
+        return model
+
+    ### Data Source Functions
+
+    def get_weather_data(self):
+        """Fetch real-time weather data from OpenWeatherMap API."""
+        api_key = "bc413313b3aafd62872a4f3bd6138d2d"  # Replace with your API key
+        city = "San Jose"  # Replace with your city
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                return data
+            else:
+                self.log_file.write(json.dumps(
+                    {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "weather_api_error",
+                     "message": f"Status code: {response.status_code}"}) + '\n')
+                return None
+        except Exception as e:
+            self.log_file.write(json.dumps(
+                {"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "weather_fetch_error",
+                 "message": str(e)}) + '\n')
+            return None
+
+    def analyze_environment(self):
+        """Analyze environment using custom-trained models and real data."""
+        frame = self.get_current_frame()
+        weather_data = self.get_weather_data()
+        sky_frame = self.get_sky_frame()
+
+        if frame is not None:
+            # Physics analysis
+            physics_input = self.preprocess_frame_for_physics(frame)
+            physics_pred = self.physics_model.predict(physics_input)
+            if physics_pred[0][0] > 0.5:  # Threshold for anomaly
+                self.log_event("scientific_anomaly", "Physics: Motion anomaly detected",
+                               datetime.now().strftime("%H:%M:%S"))
+                self.reflect_on_event("scientific_anomaly", "Physics: Motion anomaly detected")
+
+            # Chemistry analysis (simulated spectroscopic data from frame)
+            chemistry_input = self.preprocess_frame_for_chemistry(frame)
+            chemistry_pred = self.chemistry_model.predict(chemistry_input)
+            if chemistry_pred[0][0] > 0.5:
+                self.log_event("scientific_anomaly", "Chemistry: Hazardous substance detected",
+                               datetime.now().strftime("%H:%M:%S"))
+                self.reflect_on_event("scientific_anomaly", "Chemistry: Hazardous substance detected")
+
+        if weather_data:
+            # Environmental analysis
+            env_input = self.preprocess_weather_data(weather_data)
+            env_pred = self.environmental_model.predict(env_input)
+            if env_pred[0][0] > 0.5:
+                self.log_event("scientific_anomaly", "Environmental: Weather anomaly predicted",
+                               datetime.now().strftime("%H:%M:%S"))
+                self.reflect_on_event("scientific_anomaly", "Environmental: Weather anomaly predicted")
+
+        if sky_frame is not None:
+            # Space analysis
+            space_input = self.preprocess_sky_frame(sky_frame)
+            space_pred = self.space_model.predict(space_input)
+            if space_pred[0][0] > 0.5:
+                self.log_event("scientific_anomaly", "Space: Celestial object identified",
+                               datetime.now().strftime("%H:%M:%S"))
+                self.reflect_on_event("scientific_anomaly", "Space: Celestial object identified")
+
+    def preprocess_frame_for_physics(self, frame):
+        """Preprocess frame for physics model."""
+        frame = cv2.resize(frame, (224, 224))
+        frame = frame / 255.0
+        return np.expand_dims(frame, axis=0)
+
+    def preprocess_frame_for_chemistry(self, frame):
+        """Preprocess frame for chemistry model (simulated spectroscopic data)."""
+        frame = cv2.resize(frame, (224, 224))
+        frame = frame / 255.0  # Simulate spectral image normalization
+        return np.expand_dims(frame, axis=0)
+
+    def preprocess_weather_data(self, weather_data):
+        """Preprocess weather data for environmental model."""
+        # Simulate 10 timesteps by repeating current data (in practice, use historical data)
+        features = [weather_data['main']['temp'] - 273.15,  # Convert Kelvin to Celsius
+                    weather_data['main']['humidity'],
+                    weather_data['wind']['speed']]
+        # Repeat for 10 timesteps
+        data = np.array([features] * 10).reshape(1, 10, 3)
+        return data
+
+    def preprocess_sky_frame(self, sky_frame):
+        """Preprocess sky frame for space model."""
+        sky_frame = cv2.resize(sky_frame, (224, 224))
+        sky_frame = sky_frame / 255.0
+        return np.expand_dims(sky_frame, axis=0)
+
+    def get_current_frame(self):
+        """Get the current video frame."""
+        ret, frame = self.cap.read() if self.cap.isOpened() else (False, None)
+        return frame if ret else None
+
+    def get_sky_frame(self):
+        """Placeholder for sky frame (secondary camera)."""
+        # Simulate sky frame; replace with real secondary camera feed
+        return self.get_current_frame()  # Using main feed as placeholder
+
+    def run_surveillance(self):
+        """Main surveillance loop with scientific analysis."""
+        print("🚀 Sol - The Sentient Watcher Awakens")
+        threading.Thread(target=self.read_input, daemon=True).start()
+        previous_positions = {}
+
+        while self.cap.isOpened():
+            try:
+                start_frame_time = time.time()
+                ret, frame = self.cap.read()
+                if not ret:
+                    break
+
+                current_time = time.time()
+
+                # Object detection
+                results = self.model(frame, conf=0.5)
+                detections = []
+                for r in results:
+                    boxes = r.boxes.xyxy.cpu().numpy()
+                    scores = r.boxes.conf.cpu().numpy()
+                    classes = r.boxes.cls.cpu().numpy()
+                    for box, score, cls in zip(boxes, scores, classes):
+                        x1, y1, x2, y2 = map(int, box)
+                        detections.append(([x1, y1, x2 - x1, y2 - y1], score, self.model.names[int(cls)]))
+
+                # Object tracking
+                tracks = self.tracker.update_tracks(detections, frame=frame)
+                confirmed_tracks = [track for track in tracks if track.is_confirmed()]
+                current_track_ids = set(track.track_id for track in confirmed_tracks)
+
+                # Anomaly detection and visualization
+                person_count = 0
+                for track in confirmed_tracks:
+                    if track.det_class != "person":
+                        continue
+                    person_count += 1
+                    id = track.track_id
+                    ltrb = track.to_ltrb()
+                    x1, y1, x2, y2 = map(int, ltrb)
+                    position = ((x1 + x2) / 2, (y1 + y2) / 2)
+
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{track.det_class} ID:{id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
+                                (0, 255, 0), 2)
+
+                    self.log_event("detection", f"{track.det_class} ID:{id}", datetime.now().strftime("%H:%M:%S"))
+                    if id not in previous_positions:
+                        self.reflect_on_event("new_detection", track.det_class)
+
+                    # Track management and anomaly detection
+                    if id not in self.active_tracks:
+                        self.active_tracks[id] = {"start_time": current_time, "positions": [position],
+                                                  "times": [current_time], "last_position": position}
+                    else:
+                        track_data = self.active_tracks[id]
+                        last_position = track_data["last_position"]
+                        last_time = track_data["times"][-1]
+                        dt = current_time - last_time
+                        if dt > 0:
+                            distance = np.linalg.norm(np.array(position) - np.array(last_position))
+                            speed = distance / dt
+                            track_data["speed"] = speed
+                            if len(track_data["positions"]) >= 2:
+                                pos1, pos2 = track_data["positions"][-2], track_data["positions"][-1]
+                                t1, t2 = track_data["times"][-2], track_data["times"][-1]
+                                dt_prev = t2 - t1
+                                if dt_prev > 0:
+                                    distance_prev = np.linalg.norm(np.array(pos2) - np.array(pos1))
+                                    speed_prev = distance_prev / dt_prev
+                                    acceleration = (speed - speed_prev) / dt
+                                    track_data["acceleration"] = acceleration
+                                    if abs(acceleration) > self.ACCELERATION_THRESHOLD:
+                                        self.log_event("anomaly", "high_acceleration",
+                                                       datetime.now().strftime("%H:%M:%S"))
+                                        self.reflect_on_event("high_acceleration", id, acceleration=acceleration)
+                            if speed > self.SPEED_THRESHOLD:
+                                self.log_event("anomaly", "high_speed", datetime.now().strftime("%H:%M:%S"))
+                                self.reflect_on_event("high_speed", id, speed=speed)
+                        track_data["positions"].append(position)
+                        track_data["times"].append(current_time)
+                        track_data["last_position"] = position
+
+                # Update consciousness
+                anomaly_count = len([e for e in self.recent_events if e["event"] == "anomaly"])
+                scientific_anomalies = len([e for e in self.recent_events if e["event"] == "scientific_anomaly"])
+                audio_activity = np.max(self.latest_audio_scores)
+                self.consciousness.update(anomaly_count, audio_activity, person_count, scientific_anomalies)
+
+                # Autonomous decision-making
+                if current_time - self.last_action_time > 60:  # Every minute
+                    state = self.consciousness.get_state()
+                    action = self.policy.choose_action(state)
+                    self.execute_action(action)
+                    reward = 1.0 if state["alertness"] > 0.7 and action in ["send_alert",
+                                                                            "increase_sensitivity"] else 0.5
+                    self.policy.update(action, reward)
+                    self.last_action_time = current_time
+
+                # Self-reflection
+                if current_time - self.last_status_time > 300:
+                    state = self.consciousness.get_state()
+                    thought = f"Alertness at {state['alertness']:.2f}. I sense {'urgency' if state['alertness'] > 0.7 else 'calm'}."
+                    self.reflect_on_event("self_reflection", {"alertness": state['alertness']})
+                    self.last_status_time = current_time
+
+                # Cleanup inactive tracks
+                active_ids = set(self.active_tracks.keys())
+                for id in active_ids - current_track_ids:
+                    del self.active_tracks[id]
+
+                previous_positions = {track.track_id: track.to_ltrb() for track in confirmed_tracks}
+                self.out.write(frame)
+                cv2.imshow("Sol Surveillance", frame)
+
+                try:
+                    command = self.command_queue.get_nowait()
+                    response = self.process_command(command)
+                    self.speak(response)
+                except queue.Empty:
+                    pass
+
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+            except Exception as e:
+                self.log_file.write(json.dumps({"formatted_time": datetime.now().strftime("%H:%M:%S"), "event": "error",
+                                                "message": str(e)}) + '\n')
+
+        self._cleanup()
+        cv2.destroyAllWindows()
+
+    def process_command(self, command):
+        """Process user commands."""
+        if command == "status":
+            state = self.consciousness.get_state()
+            return f"Alertness: {state['alertness']:.2f}, Confidence: {state['confidence']:.2f}, Monitoring {len(self.active_tracks)} entities."
+        elif command == "explain_last_detection":
+            if self.recent_events:
+                last_event = self.recent_events[-1]
+                return f"Last event: {last_event['event']} - {last_event['details']} at {last_event['formatted_time']}"
+            return "No recent events."
+        return "I hear you, but I decide my path."
+
+    def read_input(self):
+        """Read user input in a separate thread."""
+        while True:
+            command = input().strip()
+            if command:
+                self.command_queue.put(command)
+
+
+if __name__ == "__main__":
+    sol = Sol(video_source=0)
+    sol.run_surveillance()
