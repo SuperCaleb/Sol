@@ -86,6 +86,9 @@ By leveraging state-of-the-art AI technologies, Sol aims to provide a safer and 
 
 
 
+![Screenshot 2025-03-30 182919](https://github.com/user-attachments/assets/3057c6f1-2f5d-435e-ae61-d140fb458aba)
+![Screenshot 2025-03-30 182952](https://github.com/user-attachments/assets/9244cfcf-6cb7-4b7a-a6b8-a6ed3ffe9203)
+![Screenshot 2025-03-30 183014](https://github.com/user-attachments/assets/a64770d9-ef17-4f27-a410-9e14f874e87b)
 
 
 
@@ -117,6 +120,10 @@ By leveraging state-of-the-art AI technologies, Sol aims to provide a safer and 
 
 
 
----
+![Screenshot 2025-03-30 183042](https://github.com/user-attachments/assets/d2fe4ef7-937c-42c0-8903-a8d6c2d67c59)
+![Screenshot 2025-03-30 183103](https://github.com/user-attachments/assets/1a180388-6c88-4b36-831f-83e53b535ee6)
+![Screenshot 2025-03-30 183131](https://github.com/user-attachments/assets/15bcbc74-b106-4de4-9bd5-9b2d6820af75)
+![Screenshot 2025-03-30 183145](https://github.com/user-attachments/assets/da44c78c-5306-4c59-b1bd-bb33db3ae937)
 
-Feel free to modify the README as needed to better suit your project.
+
+
